@@ -25,7 +25,11 @@ if "current_thread_id" not in st.session_state:
         st.session_state["chat_threads"].append(first_id)
         st.session_state["current_thread_id"] = first_id
 
-config = {"configurable": {"thread_id": st.session_state["current_thread_id"]}}
+config = {
+    "configurable": {"thread_id": st.session_state["current_thread_id"]},
+    "metadata": {"thread_id": st.session_state["current_thread_id"]},
+    "run_name": "chat_trace"
+}
 current_state = chatbot.get_state(config)
 existing_messages = current_state.values.get("messages", [])
 

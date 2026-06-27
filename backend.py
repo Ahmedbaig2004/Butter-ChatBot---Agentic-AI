@@ -11,6 +11,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 load_dotenv()
 connection = sqlite3.connect("langraph_chat.db",check_same_thread=False)
+print("LangSmith Tracing Enabled:", os.getenv("LANGSMITH_TRACING"))
 
 
 if not os.environ.get("GROQ_API_KEY"):
