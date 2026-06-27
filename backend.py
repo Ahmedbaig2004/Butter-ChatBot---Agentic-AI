@@ -6,11 +6,13 @@ from langchain_groq import ChatGroq
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
+import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
 
-# 1. Load the environment variables directly from .env
 load_dotenv()
+connection = sqlite3.connect("langraph_chat.db",check_same_thread=False)
 
-# Ensure the key exists without prompting the terminal
+
 if not os.environ.get("GROQ_API_KEY"):
     raise ValueError("GROQ_API_KEY is missing from your .env file!")
 
@@ -35,5 +37,14 @@ graph.add_edge(START, 'chat_node')
 graph.add_edge('chat_node', END)
 
 # 6. Memory Checkpointer
-memory = MemorySaver()
+memory = SqliteSaver(connection)
 chatbot = graph.compile(checkpointer=memory)
+
+
+def get_threads():
+    all_threads = set()
+    threads = memory.list(None)
+    for thread in threads:
+        all_threads.add(thread.config['configurable']['thread_id'])
+    return list(all_threads)
+

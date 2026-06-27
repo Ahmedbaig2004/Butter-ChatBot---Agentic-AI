@@ -2,6 +2,7 @@ import streamlit as st
 from backend import chatbot  # This imports the compiled graph engine from backend.py
 from langchain_core.messages import HumanMessage
 import uuid
+from backend import get_threads
 
 # 1. Page Configuration Setup
 st.set_page_config(page_title="Chatbutter AI", page_icon="🤖", layout="centered")
@@ -14,7 +15,7 @@ st.caption("A stateful AI Chatbot orchestrated by LangGraph & Groq")
 
 
 if "chat_threads" not in st.session_state:
-    st.session_state["chat_threads"] = []
+    st.session_state["chat_threads"] = get_threads()
 if "current_thread_id" not in st.session_state:
     if len(st.session_state["chat_threads"]) > 0:
         st.session_state["current_thread_id"] = st.session_state["chat_threads"][-1]
