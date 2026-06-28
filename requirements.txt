@@ -4,3 +4,4 @@ dotenv
 langchain_core
 streamlit
 langgraph-checkpoint-sqlite
+langchain-tavily

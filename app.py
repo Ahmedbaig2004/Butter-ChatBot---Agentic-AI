@@ -41,8 +41,9 @@ for msg in existing_messages:
             st.markdown(msg.content)
 
     elif msg.type == "ai":
-        with st.chat_message("assistant"):
-            st.markdown(msg.content)
+        if msg.content.strip():
+            with st.chat_message("assistant"):
+                st.markdown(msg.content)
 
 
 # 5. Handle New User Inputs (This replaces the old "while True" and "input()")
@@ -63,7 +64,7 @@ if user_message := st.chat_input("Type your message here..."):
             
             for chunk, metadata in stream:
                 if metadata.get("langgraph_node") == "chat_node":
-                    if chunk.content:
+                    if hasattr(chunk, 'content') and chunk.content:
                         yield chunk.content
 
         st.write_stream(langchain_stream_generator())
