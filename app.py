@@ -1,8 +1,10 @@
 import streamlit as st
-from backend import chatbot  # This imports the compiled graph engine from backend.py
+from backend import chatbot,initialize_dynamic_rag,set_pdf_retriever # This imports the compiled graph engine from backend.py
 from langchain_core.messages import HumanMessage
 import uuid
 from backend import get_threads
+import backend 
+import tempfile
 
 # 1. Page Configuration Setup
 st.set_page_config(page_title="Chatbutter AI", page_icon="🤖", layout="centered")
@@ -90,8 +92,7 @@ if user_message := st.chat_input("Type your message here..."):
                     if hasattr(chunk, 'content') and chunk.content:
                         yield chunk.content
                 
-                # NOTE: We removed the green "Tool execution finished!" block here 
-                # because it was overwriting the blue info box!
+
 
         # Stream the actual text below the status box
         st.write_stream(langchain_stream_generator())
@@ -116,3 +117,29 @@ with st.sidebar:
         if st.button(type_label, key=t_id, use_container_width=True):
             st.session_state["current_thread_id"] = t_id
             st.rerun() # Refresh the page to load the clicked chat's history
+            
+    st.divider()
+    st.subheader("📁 Upload Knowledge Base")
+    
+    # Render the file upload widget
+    uploaded_file = st.file_uploader("Upload a PDF to chat with it", type=["pdf"])
+    
+    if uploaded_file is not None:
+        # Prevent processing the same file multiple times unnecessarily during reruns
+        if "processed_file" not in st.session_state or st.session_state["processed_file"] != uploaded_file.name:
+            with st.spinner("Processing PDF and building vector index..."):
+                
+                # 1. Create a temporary file to save the uploaded bytes
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+                    temp_file.write(uploaded_file.read())
+                    temp_file_path = temp_file.name
+                
+                # 2. Call backend to build the FAISS index for this specific file
+                retriever = initialize_dynamic_rag(temp_file_path)
+                
+                # 3. FIXED: Save it straight to session state so it survives chat reruns!
+                set_pdf_retriever(st.session_state["current_thread_id"], retriever)
+                st.session_state["processed_file"] = uploaded_file.name 
+                
+                # 4. Save the state filename check
+                st.success(f"Successfully indexed: {uploaded_file.name}!")

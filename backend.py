@@ -12,6 +12,13 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode,tools_condition
 from langchain_tavily import TavilySearch
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores import FAISS
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.runnables import RunnableConfig
+import streamlit as st
+
 import requests
 import math
 
@@ -20,11 +27,44 @@ load_dotenv()
 connection = sqlite3.connect("langraph_chat.db",check_same_thread=False)
 print("LangSmith Tracing Enabled:", os.getenv("LANGSMITH_TRACING"))
 
+def initialize_dynamic_rag(file_path: str):
+    """Loads a specific PDF, chunks it, and returns a FAISS retriever."""
+    loader = PyPDFLoader(file_path)
+    documents = loader.load()  
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    pdf_chunks = text_splitter.split_documents(documents)
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    pdf_vectorstore = FAISS.from_documents(pdf_chunks, embeddings)
+    return pdf_vectorstore.as_retriever(search_kwargs={"k": 3})
 
 if not os.environ.get("GROQ_API_KEY"):
     raise ValueError("GROQ_API_KEY is missing from your .env file!")
 
 
+pdf_retrievers: dict[str, any] = {}
+def set_pdf_retriever(thread_id: str, retriever):
+    pdf_retrievers[thread_id] = retriever
+@tool
+def rag(query: str, config: RunnableConfig) -> str:
+    """Useful for answering questions using the internal PDF knowledge base."""
+    thread_id = config["configurable"].get("thread_id")
+    retriever = pdf_retrievers.get(thread_id)
+
+    if retriever is None:
+        return "No PDF has been loaded yet. Please tell the user to upload a PDF in the sidebar first."
+
+    try:
+        response = retriever.invoke(query)
+        if not response:
+            return "No relevant information found in the PDF."
+        retrieved_text = "\n\n---\n\n".join(doc.page_content for doc in response)
+        return f"Retrieved Information:\n\n{retrieved_text}"
+    except Exception as e:
+        return f"An error occurred while retrieving information: {str(e)}"
+
+
+
+    
 @tool
 def calculator(expression: str) -> str:
     """Useful for evaluating mathematical expressions. 
@@ -71,7 +111,7 @@ web_search = TavilySearch(max_results=5)
 # 2. Initialize LLM
 GROQ_MODEL = "llama-3.1-8b-instant"
 llm = ChatGroq(model=GROQ_MODEL, temperature=0)
-tools = [calculator, get_stock_price, web_search]
+tools = [calculator, get_stock_price, web_search,rag]
 llm_tools = llm.bind_tools(tools)
 # 3. Define State Schema
 class ChatState(TypedDict):

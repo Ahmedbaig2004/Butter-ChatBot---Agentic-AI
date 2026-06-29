@@ -5,3 +5,9 @@ langchain_core
 streamlit
 langgraph-checkpoint-sqlite
 langchain-tavily
+faiss-cpu
+sentence-transformers
+langchain-community
+langchain-huggingface
+pypdf
+torchvision
