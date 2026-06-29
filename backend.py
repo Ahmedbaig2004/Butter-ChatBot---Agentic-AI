@@ -1,7 +1,6 @@
 import os
 from typing import Annotated, TypedDict
 import sqlite3
-
 from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage
 from langchain_groq import ChatGroq

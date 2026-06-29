@@ -1,8 +1,7 @@
 import streamlit as st
-from backend import chatbot,initialize_dynamic_rag,set_pdf_retriever # This imports the compiled graph engine from backend.py
+from backend import chatbot,initialize_dynamic_rag,set_pdf_retriever,get_threads,pdf_retrievers # This imports the compiled graph engine from backend.py
 from langchain_core.messages import HumanMessage
 import uuid
-from backend import get_threads
 import backend 
 import tempfile
 
@@ -45,7 +44,7 @@ for msg in existing_messages:
     elif msg.type == "ai":
         with st.chat_message("assistant"):
             # Check if this past AI message was a tool execution
-            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+            if msg.tool_calls:
                 for tool_call in msg.tool_calls:
                     st.info(f"Used tool: **{tool_call['name']}**", icon="⚙️")
             
@@ -83,10 +82,11 @@ if user_message := st.chat_input("Type your message here..."):
                     if hasattr(chunk, 'tool_call_chunks') and chunk.tool_call_chunks:
                         for tc in chunk.tool_call_chunks:
                             if tc.get("name"):
+                                before = len(used_tools)
                                 used_tools.add(tc['name'])
-                                # Join multiple tools together if the AI uses more than one
-                                tools_formatted = " + ".join([f"**{name}**" for name in used_tools])
-                                tool_status.info(f"Used tool: {tools_formatted}", icon="⚙️")
+                                if len(used_tools) > before:   # only re-render if something new was actually added
+                                    tools_formatted = " + ".join([f"**{name}**" for name in used_tools])
+                                    tool_status.info(f"Used tool: {tools_formatted}", icon="⚙️")
                     
                     # Yield standard text for the typing animation
                     if hasattr(chunk, 'content') and chunk.content:
@@ -104,42 +104,45 @@ with st.sidebar:
         new_id = str(uuid.uuid4())
         st.session_state["chat_threads"].append(new_id)
         st.session_state["current_thread_id"] = new_id
-        st.rerun() # Refresh the page to load the clean slate
+        st.rerun()
     
     st.divider()
     
     # Render a list of clickable chat options
     for idx, t_id in enumerate(st.session_state["chat_threads"]):
-        # Highlight the currently active chat thread
         is_current = (t_id == st.session_state["current_thread_id"])
         type_label = "👉 Active Chat" if is_current else f"Chat Session {idx + 1}"
         
         if st.button(type_label, key=t_id, use_container_width=True):
             st.session_state["current_thread_id"] = t_id
-            st.rerun() # Refresh the page to load the clicked chat's history
+            st.rerun()
             
     st.divider()
     st.subheader("📁 Upload Knowledge Base")
-    
-    # Render the file upload widget
+
+
+    current_thread = st.session_state["current_thread_id"]
+    has_pdf_for_thread = current_thread in pdf_retrievers
+
+    if has_pdf_for_thread:
+        st.success("📄 This chat has a PDF loaded.")
+    else:
+        st.info("No PDF attached to this chat yet.")
+
     uploaded_file = st.file_uploader("Upload a PDF to chat with it", type=["pdf"])
-    
+
     if uploaded_file is not None:
-        # Prevent processing the same file multiple times unnecessarily during reruns
-        if "processed_file" not in st.session_state or st.session_state["processed_file"] != uploaded_file.name:
+        already_done = st.session_state.get("processed_file_per_thread", {}).get(current_thread) == uploaded_file.name
+
+        if not already_done:
             with st.spinner("Processing PDF and building vector index..."):
-                
-                # 1. Create a temporary file to save the uploaded bytes
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
                     temp_file.write(uploaded_file.read())
                     temp_file_path = temp_file.name
-                
-                # 2. Call backend to build the FAISS index for this specific file
+
                 retriever = initialize_dynamic_rag(temp_file_path)
-                
-                # 3. FIXED: Save it straight to session state so it survives chat reruns!
-                set_pdf_retriever(st.session_state["current_thread_id"], retriever)
-                st.session_state["processed_file"] = uploaded_file.name 
-                
-                # 4. Save the state filename check
+
+                set_pdf_retriever(current_thread, retriever)
+                st.session_state.setdefault("processed_file_per_thread", {})[current_thread] = uploaded_file.name
+
                 st.success(f"Successfully indexed: {uploaded_file.name}!")
