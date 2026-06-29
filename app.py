@@ -41,8 +41,14 @@ for msg in existing_messages:
             st.markdown(msg.content)
 
     elif msg.type == "ai":
-        if msg.content.strip():
-            with st.chat_message("assistant"):
+        with st.chat_message("assistant"):
+            # Check if this past AI message was a tool execution
+            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                for tool_call in msg.tool_calls:
+                    st.info(f"Used tool: **{tool_call['name']}**", icon="⚙️")
+            
+            # Only render text if the AI message actually contains text
+            if msg.content.strip():
                 st.markdown(msg.content)
 
 
@@ -55,6 +61,9 @@ if user_message := st.chat_input("Type your message here..."):
     # Render the assistant chat bubble
     with st.chat_message("assistant"):
         
+        # Create an empty container to hold the tool UI above the typing text
+        tool_status = st.empty()
+        
         def langchain_stream_generator():
             stream = chatbot.stream(
                 {"messages": [HumanMessage(content=user_message)]}, 
@@ -62,11 +71,29 @@ if user_message := st.chat_input("Type your message here..."):
                 stream_mode="messages"
             )
             
+            # Keep track of tools used in this exact run so they don't overwrite each other
+            used_tools = set()
+            
             for chunk, metadata in stream:
                 if metadata.get("langgraph_node") == "chat_node":
+                    
+                    # Catch the AI deciding to call a tool
+                    if hasattr(chunk, 'tool_call_chunks') and chunk.tool_call_chunks:
+                        for tc in chunk.tool_call_chunks:
+                            if tc.get("name"):
+                                used_tools.add(tc['name'])
+                                # Join multiple tools together if the AI uses more than one
+                                tools_formatted = " + ".join([f"**{name}**" for name in used_tools])
+                                tool_status.info(f"Used tool: {tools_formatted}", icon="⚙️")
+                    
+                    # Yield standard text for the typing animation
                     if hasattr(chunk, 'content') and chunk.content:
                         yield chunk.content
+                
+                # NOTE: We removed the green "Tool execution finished!" block here 
+                # because it was overwriting the blue info box!
 
+        # Stream the actual text below the status box
         st.write_stream(langchain_stream_generator())
 with st.sidebar:
     st.title("💬 Chat History")
