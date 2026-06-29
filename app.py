@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage
 import uuid
 import backend 
 import tempfile
+from langgraph.types import Command
 
 # 1. Page Configuration Setup
 st.set_page_config(page_title="Chatbutter AI", page_icon="🤖", layout="centered")
@@ -23,6 +24,20 @@ def extract_text(content):
                 parts.append(block)
         return "".join(parts)
     return ""
+
+
+def get_pending_interrupt(config):
+    """Returns the Interrupt object if the graph is genuinely paused, else None.
+    Always re-derives truth from the actual graph state instead of trusting
+    a manually-maintained session_state flag (which can go stale)."""
+    state = chatbot.get_state(config)
+    if not state.next:
+        return None
+    task = next((t for t in state.tasks if t.interrupts), None)
+    if task is None:
+        return None
+    return task.interrupts[0]
+
 
 # 3. Pull historical messages directly from the LangGraph Checkpointer State
 
@@ -66,48 +81,59 @@ for msg in existing_messages:
 
 
 # 5. Handle New User Inputs (This replaces the old "while True" and "input()")
-if user_message := st.chat_input("Type your message here..."):
-    # Instantly render user's message in the web UI
-    with st.chat_message("user"):
-        st.markdown(user_message)
-
-    # Render the assistant chat bubble
+def run_turn(input_data):
+    """input_data is either {'messages': [...]} for a new message, 
+    or a Command(resume=...) for resuming after interrupt approval."""
     with st.chat_message("assistant"):
-        
-        # Create an empty container to hold the tool UI above the typing text
         tool_status = st.empty()
         
-        def langchain_stream_generator():
+        def stream_gen():
             try:
-                stream = chatbot.stream(
-                    {"messages": [HumanMessage(content=user_message)]}, 
-                    config, 
-                    stream_mode="messages"
-                )
+                stream = chatbot.stream(input_data, config, stream_mode="messages")
                 used_tools = set()
-                
                 for chunk, metadata in stream:
                     if metadata.get("langgraph_node") == "chat_node":
-                        
                         if hasattr(chunk, 'tool_call_chunks') and chunk.tool_call_chunks:
                             for tc in chunk.tool_call_chunks:
                                 if tc.get("name"):
-                                    before = len(used_tools)
                                     used_tools.add(tc['name'])
-                                    if len(used_tools) > before:
-                                        tools_formatted = " + ".join([f"**{name}**" for name in used_tools])
-                                        tool_status.info(f"Used tool: {tools_formatted}", icon="⚙️")
-                        
+                                    tools_formatted = " + ".join(f"**{n}**" for n in used_tools)
+                                    tool_status.info(f"Used tool: {tools_formatted}", icon="⚙️")
                         text = extract_text(getattr(chunk, 'content', None))
                         if text:
                             yield text
             except Exception as e:
                 yield f"\n\n⚠️ Something went wrong: {str(e)}"
-                
+        
+        st.write_stream(stream_gen())
+
+    # After the stream finishes, just rerun — the next pass will re-check
+    # get_pending_interrupt(config) fresh, so there's no flag to keep in sync.
+    st.rerun()
 
 
-        # Stream the actual text below the status box
-        st.write_stream(langchain_stream_generator())
+# Always re-derive whether we're paused on an interrupt, fresh, from the graph itself.
+pending = get_pending_interrupt(config)
+
+# Normal chat input — only show if nothing is pending approval
+if pending is None:
+    if user_message := st.chat_input("Type your message here..."):
+        with st.chat_message("user"):
+            st.markdown(user_message)
+        run_turn({"messages": [HumanMessage(content=user_message)]})
+
+# If paused on an interrupt, show approval buttons instead of the normal chat input
+else:
+    st.warning(pending.value)  # e.g. "Are you sure you want to purchase 10 shares of AAPL?"
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✅ Yes, proceed", use_container_width=True):
+            run_turn(Command(resume="yes"))
+    with col2:
+        if st.button("❌ Cancel", use_container_width=True):
+            run_turn(Command(resume="no"))
+
 with st.sidebar:
     st.title("💬 Chat History")
     

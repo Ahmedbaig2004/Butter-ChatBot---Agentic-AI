@@ -17,6 +17,8 @@ from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.types import interrupt
+
 
 import streamlit as st
 
@@ -67,7 +69,17 @@ def rag(query: str, config: RunnableConfig) -> str:
 
 
 
+@tool 
+def purchase_stock(symbol:str,quantity:int) -> str:
+    """Simulates a stock purchase. In a real-world scenario, this would interface with a brokerage API.NOTE: This is a mock function and does not perform real stock transactions."""
+    # For demonstration purposes, we'll just return a confirmation message.
+    decision = interrupt(f"Are you sure you want to purchase {quantity} shares of {symbol}? (yes/no)")
+    if isinstance(decision, str) and decision.lower() == "yes":
+        return f"Successfully purchased {quantity} shares of {symbol}."
+    else:
+        return f"Purchase of {quantity} shares of {symbol} was canceled."
     
+
 @tool
 def calculator(expression: str) -> str:
     """Useful for evaluating mathematical expressions. 
@@ -114,7 +126,7 @@ web_search = TavilySearch(max_results=5)
 # 2. Initialize LLM
 GEMINI_MODEL = "gemini-2.5-flash"
 llm = ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=0)
-tools = [calculator, get_stock_price, web_search,rag]
+tools = [calculator, get_stock_price, web_search,rag,purchase_stock]
 llm_tools = llm.bind_tools(tools)
 # 3. Define State Schema
 class ChatState(TypedDict):
