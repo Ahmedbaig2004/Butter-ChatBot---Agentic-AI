@@ -10,7 +10,19 @@ st.set_page_config(page_title="Chatbutter AI", page_icon="🤖", layout="centere
 st.title("🤖 Chatbutter Studio")
 st.caption("A stateful AI Chatbot orchestrated by LangGraph & Groq")
 
-
+def extract_text(content):
+    """Normalize message content to a plain string, regardless of provider shape."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return ""
 
 # 3. Pull historical messages directly from the LangGraph Checkpointer State
 
@@ -47,10 +59,10 @@ for msg in existing_messages:
             if msg.tool_calls:
                 for tool_call in msg.tool_calls:
                     st.info(f"Used tool: **{tool_call['name']}**", icon="⚙️")
-            
-            # Only render text if the AI message actually contains text
-            if msg.content.strip():
-                st.markdown(msg.content)
+            text = extract_text(msg.content)
+
+            if text.strip():
+                st.markdown(text)
 
 
 # 5. Handle New User Inputs (This replaces the old "while True" and "input()")
@@ -66,31 +78,31 @@ if user_message := st.chat_input("Type your message here..."):
         tool_status = st.empty()
         
         def langchain_stream_generator():
-            stream = chatbot.stream(
-                {"messages": [HumanMessage(content=user_message)]}, 
-                config, 
-                stream_mode="messages"
-            )
-            
-            # Keep track of tools used in this exact run so they don't overwrite each other
-            used_tools = set()
-            
-            for chunk, metadata in stream:
-                if metadata.get("langgraph_node") == "chat_node":
-                    
-                    # Catch the AI deciding to call a tool
-                    if hasattr(chunk, 'tool_call_chunks') and chunk.tool_call_chunks:
-                        for tc in chunk.tool_call_chunks:
-                            if tc.get("name"):
-                                before = len(used_tools)
-                                used_tools.add(tc['name'])
-                                if len(used_tools) > before:   # only re-render if something new was actually added
-                                    tools_formatted = " + ".join([f"**{name}**" for name in used_tools])
-                                    tool_status.info(f"Used tool: {tools_formatted}", icon="⚙️")
-                    
-                    # Yield standard text for the typing animation
-                    if hasattr(chunk, 'content') and chunk.content:
-                        yield chunk.content
+            try:
+                stream = chatbot.stream(
+                    {"messages": [HumanMessage(content=user_message)]}, 
+                    config, 
+                    stream_mode="messages"
+                )
+                used_tools = set()
+                
+                for chunk, metadata in stream:
+                    if metadata.get("langgraph_node") == "chat_node":
+                        
+                        if hasattr(chunk, 'tool_call_chunks') and chunk.tool_call_chunks:
+                            for tc in chunk.tool_call_chunks:
+                                if tc.get("name"):
+                                    before = len(used_tools)
+                                    used_tools.add(tc['name'])
+                                    if len(used_tools) > before:
+                                        tools_formatted = " + ".join([f"**{name}**" for name in used_tools])
+                                        tool_status.info(f"Used tool: {tools_formatted}", icon="⚙️")
+                        
+                        text = extract_text(getattr(chunk, 'content', None))
+                        if text:
+                            yield text
+            except Exception as e:
+                yield f"\n\n⚠️ Something went wrong: {str(e)}"
                 
 
 

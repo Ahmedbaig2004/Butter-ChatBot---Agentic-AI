@@ -16,6 +16,8 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.runnables import RunnableConfig
+from langchain_google_genai import ChatGoogleGenerativeAI
+
 import streamlit as st
 
 import requests
@@ -34,8 +36,10 @@ def initialize_dynamic_rag(file_path: str):
     pdf_chunks = text_splitter.split_documents(documents)
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     pdf_vectorstore = FAISS.from_documents(pdf_chunks, embeddings)
-    return pdf_vectorstore.as_retriever(search_kwargs={"k": 3})
+    return pdf_vectorstore.as_retriever(search_kwargs={"k": 2})
 
+if not os.environ.get("GOOGLE_API_KEY"):
+    raise ValueError("GOOGLE_API_KEY is missing from your .env file!")
 if not os.environ.get("GROQ_API_KEY"):
     raise ValueError("GROQ_API_KEY is missing from your .env file!")
 
@@ -108,8 +112,8 @@ def get_stock_price(ticker: str) -> str:
 web_search = TavilySearch(max_results=5)
 
 # 2. Initialize LLM
-GROQ_MODEL = "llama-3.1-8b-instant"
-llm = ChatGroq(model=GROQ_MODEL, temperature=0)
+GEMINI_MODEL = "gemini-2.5-flash"
+llm = ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=0)
 tools = [calculator, get_stock_price, web_search,rag]
 llm_tools = llm.bind_tools(tools)
 # 3. Define State Schema
