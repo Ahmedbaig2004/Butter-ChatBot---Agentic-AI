@@ -2,7 +2,7 @@ name: CI/CD - Build, Push & Deploy Streamlit App
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "master"]
   workflow_dispatch:
 
 concurrency:
