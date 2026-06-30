@@ -1,0 +1,54 @@
+# Git configuration
+
+.git
+.gitignore
+
+# Python caching and build artifacts
+
+**pycache**/
+_.pyc
+_.pyo
+_.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+build/
+dist/
+_.egg-info/
+
+# Virtual Environments (Crucial to exclude so local OS packages don't overwrite container packages)
+
+.venv/
+venv/
+env/
+ENV/
+
+# Streamlit specific configurations and caches
+
+.streamlit/config.toml
+.streamlit/secrets.toml
+~/.streamlit/
+
+# Local environment variables / Secrets
+
+.env
+\*.env
+secrets.json
+
+# IDE / Editor folders
+
+.vscode/
+.idea/
+_.swp
+_.swo
+
+# OS specific files
+
+.DS_Store
+Thumbs.db
+
+# Documentation and Docker files
+
+README.md
+Docker+
+Dockerfile
+.dockerignore

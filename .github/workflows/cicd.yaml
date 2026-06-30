@@ -1,0 +1,136 @@
+name: CI/CD - Build, Push & Deploy Streamlit App
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/chatbutter-app
+
+jobs:
+  test:
+    name: Lint & Test
+    runs-on: ubuntu-latest # cheap, fast, no need to burn EC2 runner time on this
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install flake8 pytest
+
+      - name: Lint with flake8
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-line-length=120 --statistics
+
+      - name: Run tests
+        run: |
+          if [ -d "tests" ] || ls test_*.py *_test.py >/dev/null 2>&1; then
+            pytest -v
+          else
+            echo "No tests found, skipping pytest step."
+          fi
+
+  build-and-deploy:
+    name: Build, Push & Deploy on EC2 Runner
+    needs: test
+    runs-on:
+      self-hosted # <-- replace with your runner's actual labels if different,
+      #     e.g. [self-hosted, Linux, X64]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        run: |
+          docker build -t $IMAGE_NAME:latest -t $IMAGE_NAME:${{ github.sha }} .
+          docker push $IMAGE_NAME:latest
+          docker push $IMAGE_NAME:${{ github.sha }}
+
+      - name: Deploy with health check & rollback
+        run: |
+          set -e
+          APP_NAME="chatbutter-app"
+          ENV_FILE="$HOME/chatbutter.env"
+
+          # Remember the image currently running so we can roll back to it if needed
+          PREVIOUS_IMAGE=$(docker inspect --format='{{.Config.Image}}' $APP_NAME 2>/dev/null || echo "")
+
+          # Stop and remove the currently running container
+          docker stop $APP_NAME || true
+          docker rm $APP_NAME || true
+
+          # Write env file fresh from GitHub Secrets (never stored in repo)
+          cat > $ENV_FILE <<EOF
+          TAVILY_API_KEY=${{ secrets.TAVILY_API_KEY }}
+          LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }}
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+          LANGSMITH_TRACING=${{ secrets.LANGSMITH_TRACING }}
+          LANGSMITH_PROJECT=${{ secrets.LANGSMITH_PROJECT }}
+          LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}
+          ALPHA_VANTAGE_API_KEY=${{ secrets.ALPHA_VANTAGE_API_KEY }}
+          GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+          EOF
+
+          # Start the new container
+          docker run -d \
+            --name $APP_NAME \
+            --restart unless-stopped \
+            -p 8501:8501 \
+            --env-file $ENV_FILE \
+            $IMAGE_NAME:latest
+
+          # Health check
+          echo "Waiting for container to become healthy..."
+          HEALTHY=false
+          for i in $(seq 1 12); do
+            sleep 5
+            if curl -fs http://localhost:8501/_stcore/health > /dev/null; then
+              HEALTHY=true
+              echo "Health check passed on attempt $i."
+              break
+            fi
+            echo "Attempt $i: not healthy yet..."
+          done
+
+          if [ "$HEALTHY" != "true" ]; then
+            echo "Health check failed after deploy. Rolling back..."
+            docker logs $APP_NAME --tail 100 || true
+            docker stop $APP_NAME || true
+            docker rm $APP_NAME || true
+
+            if [ -n "$PREVIOUS_IMAGE" ]; then
+              docker run -d \
+                --name $APP_NAME \
+                --restart unless-stopped \
+                -p 8501:8501 \
+                --env-file $ENV_FILE \
+                $PREVIOUS_IMAGE
+              echo "Rolled back to previous image: $PREVIOUS_IMAGE"
+            else
+              echo "No previous image found to roll back to. Manual intervention required."
+            fi
+            exit 1
+          fi
+
+          # Clean up unused images to save disk space
+          docker image prune -af
